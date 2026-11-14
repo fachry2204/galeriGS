@@ -1,0 +1,73 @@
+<script setup>
+import { ref,onMounted } from 'vue'; import { useRouter } from 'vue-router'; import Swal from 'sweetalert2'; import { api } from '../services/api'
+const router=useRouter(),token=sessionStorage.getItem('gallery_token'),user=ref(null),albums=ref([]),categories=ref([]),section=ref('albums'),editing=ref(null),photos=ref([]),files=ref([]),progress=ref(0),message=ref(''),form=ref({title:'',slug:'',category_id:'',description:'',event_date:'',location:'',is_published:false,is_featured:false}),cat=ref({name:'',slug:'',description:'',is_active:true})
+const uploading=ref(false), uploadResults=ref([]), fileInput=ref(null)
+const auth={headers:{Authorization:'Bearer '+token}}; if(!token)router.replace('/admin/login')
+async function load(){try{let [u,a,c]=await Promise.all([api.get('/admin/me',auth),api.get('/admin/albums',auth),api.get('/admin/categories',auth)]);user.value=u.data;albums.value=a.data.data;categories.value=c.data}catch{sessionStorage.removeItem('gallery_token');router.replace('/admin/login')}}
+onMounted(()=>{if(token)load()});function slug(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+function fresh(){editing.value=null;photos.value=[];files.value=[];form.value={title:'',slug:'',category_id:'',description:'',event_date:'',location:'',is_published:false,is_featured:false};section.value='edit'}
+async function edit(a){try{const r=await api.get('/admin/albums/'+a.id,auth);editing.value=a.id;form.value={...r.data,event_date:r.data.event_date?.slice(0,10)||''};photos.value=r.data.photos;files.value=[];section.value='edit'}catch{message.value='Album gagal dimuat.'}}
+async function save(){try{const payload={...form.value,category_id:Number(form.value.category_id)};let r=editing.value?await api.put('/admin/albums/'+editing.value,payload,auth):await api.post('/admin/albums',payload,auth);editing.value=r.data.id;message.value='Album tersimpan.';await load()}catch(e){message.value=e.response?.data?.message||'Gagal menyimpan album.'}}
+function selectFiles(event){files.value=Array.from(event.target.files || []);uploadResults.value=[];progress.value=0}
+function uploadError(error){
+ if(error.response?.status===413)return 'Ukuran file melebihi batas server. Periksa upload_max_filesize dan post_max_size PHP.'
+ if(error.response?.status===401 || error.response?.status===403)return 'Sesi tidak berlaku atau akses ditolak. Silakan masuk kembali.'
+ const errors=error.response?.data?.errors
+ if(errors)return Object.values(errors).flat().join(' ')
+ return error.response?.data?.message || 'Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.'
+}
+async function upload(){
+ if(!editing.value || uploading.value || !files.value.length)return
+ const queue=Array.from(files.value), failed=[]; let success=0
+ uploadResults.value=[];progress.value=0;uploading.value=true;message.value=''
+ try{
+  for(let i=0;i<queue.length;i++){
+   const file=queue[i], entry={name:file.name,status:'Mengunggah',error:''};uploadResults.value.push(entry)
+   try{
+    if(!/\.(jpe?g|png|webp)$/i.test(file.name))throw new Error('Format tidak didukung. Gunakan JPEG, PNG, atau WebP.')
+    if(file.size>20*1024*1024)throw new Error('Ukuran melebihi 20 MB.')
+    const data=new FormData();data.append('photos[]',file)
+    await api.post('/admin/albums/'+editing.value+'/photos',data,{...auth,onUploadProgress:e=>{progress.value=Math.round((i+(e.total?e.loaded/e.total:0))/queue.length*100)}})
+    entry.status='Berhasil';success++
+   }catch(error){entry.status='Gagal';entry.error=error.response ? uploadError(error) : (error.message || uploadError(error));failed.push(file)}
+   progress.value=Math.round((i+1)/queue.length*100)
+  }
+  files.value=failed
+  if(fileInput.value)fileInput.value.value=''
+  message.value=`${success} foto berhasil diunggah${failed.length ? `; ${failed.length} gagal. Anda dapat mencoba kembali foto yang gagal.` : '.'}`
+  try{const result=await api.get('/admin/albums/'+editing.value,auth);photos.value=result.data.photos;await load()}catch{message.value+=' Daftar foto belum dapat diperbarui; buka kembali album.'}
+ }finally{uploading.value=false}
+}
+async function removePhoto(p){
+ const result=await Swal.fire({title:'Hapus foto ini?',text:`Hanya foto ${p.original_filename} yang akan dihapus.`,showCancelButton:true,confirmButtonText:'Hapus foto',cancelButtonText:'Batal'})
+ if(!result.isConfirmed)return
+ try{await api.delete('/admin/photos/'+p.id,auth);photos.value=photos.value.filter(photo=>photo.id!==p.id);if(form.value.cover_photo_id===p.id)form.value.cover_photo_id=null;message.value='Foto berhasil dihapus.';await load()}
+ catch(e){await Swal.fire({icon:'error',title:'Foto gagal dihapus',text:e.response?.data?.message||'Periksa koneksi lalu coba lagi.'})}
+}
+async function cover(p){form.value.cover_photo_id=p.id;await save()}
+async function removeAlbum(a){
+ if(a.photos_count>0){const result=await Swal.fire({icon:'info',title:'Album masih berisi foto',text:`${a.title} berisi ${a.photos_count} foto. Buka album untuk menghapus foto yang dipilih. Album hanya bisa dihapus jika sudah kosong.`,showCancelButton:true,confirmButtonText:'Kelola foto',cancelButtonText:'Tutup'});if(result.isConfirmed)await edit(a);return}
+ if(!(await Swal.fire({title:'Hapus album kosong?',text:`Album ${a.title} akan dihapus.`,showCancelButton:true,confirmButtonText:'Hapus album',cancelButtonText:'Batal'})).isConfirmed)return
+ try{await api.delete('/admin/albums/'+a.id,auth);await load();message.value='Album kosong berhasil dihapus.'}catch(e){await Swal.fire({icon:'error',title:'Album gagal dihapus',text:e.response?.data?.message||'Periksa koneksi lalu coba lagi.'})}
+}
+async function saveCategory(){try{if(cat.value.id)await api.put('/admin/categories/'+cat.value.id,cat.value,auth);else await api.post('/admin/categories',cat.value,auth);cat.value={name:'',slug:'',description:'',is_active:true};await load();message.value='Kategori tersimpan.'}catch(e){message.value=e.response?.data?.message||'Kategori gagal disimpan.'}}
+async function deleteCategory(c){
+ const total=c.albums_total_count ?? c.albums_count
+ let replacement=null
+ if(total>0){
+  const choices=Object.fromEntries(categories.value.filter(item=>item.id!==c.id).map(item=>[item.id,item.name]))
+  if(!Object.keys(choices).length){await Swal.fire({icon:'info',title:'Kategori pengganti diperlukan',text:'Buat kategori lain terlebih dahulu untuk memindahkan album yang terkait.'});return}
+  const result=await Swal.fire({title:'Pindahkan album dan hapus kategori?',text:`Kategori ini terkait dengan ${total} album, termasuk album yang sudah dihapus. Pilih kategori pengganti.`,input:'select',inputOptions:choices,inputPlaceholder:'Pilih kategori pengganti',inputValidator:value=>!value?'Pilih kategori pengganti.':undefined,showCancelButton:true,confirmButtonText:'Pindahkan dan hapus',cancelButtonText:'Batal'})
+  if(!result.isConfirmed)return
+  replacement=Number(result.value)
+ }else if(!(await Swal.fire({title:'Hapus kategori?',text:`Kategori ${c.name} akan dihapus.`,showCancelButton:true,confirmButtonText:'Hapus',cancelButtonText:'Batal'})).isConfirmed)return
+ try{await api.delete('/admin/categories/'+c.id,{...auth,data:replacement?{replacement_category_id:replacement}:{}});if(cat.value.id===c.id)cat.value={name:'',slug:'',description:'',is_active:true};await load();message.value='Kategori berhasil dihapus.'}catch(e){await Swal.fire({icon:'error',title:'Kategori gagal dihapus',text:e.response?.data?.message||'Periksa koneksi dan coba lagi.'})}
+}
+async function logout(){try{await api.post('/admin/logout',{},auth)}finally{sessionStorage.removeItem('gallery_token');router.replace('/admin/login')}}
+</script>
+<template><div class="admin"><aside><div class="brand">KELURAHAN <small>GROGOL SELATAN</small></div><p>ADMINISTRATION</p><button :class="{active: section === 'albums' || section === 'edit'}" @click="section='albums'">▦ &nbsp; Album</button><button :class="{active: section === 'categories'}" @click="section='categories'">◇ &nbsp; Kategori</button><button @click="logout">↗ &nbsp; Keluar</button></aside><main><header><div><div class="eyebrow"><i></i> PANEL ADMIN</div><h1>{{section==='edit'?'Kelola album':section==='categories'?'Kategori':'Album foto'}}</h1></div><span>{{user?.name}}</span></header><p v-if="message" class="notice">{{message}}</p><template v-if="section==='albums'"><button class="button dark" @click="fresh">+ Tambah album</button><div class="admin-table"><div v-for="a in albums" :key="a.id" class="admin-row"><div><strong>{{a.title}}</strong><small>{{a.category?.name}} · {{a.photos_count}} foto · {{a.is_published?'Publik':'Draft'}}</small></div><button @click="edit(a)">Edit</button><button @click="removeAlbum(a)">Hapus album</button></div><p v-if="!albums.length">Belum ada album.</p></div></template><template v-else-if="section==='edit'"><button class="text-link" @click="section='albums'">← Kembali ke album</button><form @submit.prevent="save" class="admin-form"><label>Nama album<input v-model="form.title" @input="!editing && (form.slug=slug(form.title))" required></label><label>Slug<input v-model="form.slug" required></label><label>Kategori<select v-model="form.category_id" required><option value="">Pilih kategori</option><option v-for="c in categories" :value="c.id">{{c.name}}</option></select></label><label>Tanggal<input v-model="form.event_date" type="date"></label><label>Lokasi<input v-model="form.location"></label><label class="wide">Deskripsi<textarea v-model="form.description"></textarea></label><label class="check"><input type="checkbox" v-model="form.is_published"> Publikasikan</label><label class="check"><input type="checkbox" v-model="form.is_featured"> Featured</label><button class="button dark">Simpan album</button></form><p v-if="!editing" class="notice">Simpan album terlebih dahulu untuk menambahkan foto.</p><template v-if="editing"><h2>Foto album</h2><p class="upload-help">Pilih foto JPEG, PNG, atau WebP. Maksimal 20 MB per foto. Foto dikirim satu per satu.</p><div class="upload"><input ref="fileInput" type="file" multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" :disabled="uploading" @change="selectFiles"><button class="button dark" :disabled="!files.length || uploading" @click="upload">{{uploading ? 'Mengunggah...' : `Unggah ${files.length} foto`}}</button><progress v-if="uploading || progress" :value="progress" max="100" :aria-label="`Kemajuan upload ${progress}%`"></progress><span v-if="uploading || progress">{{progress}}%</span></div><ul v-if="uploadResults.length" class="upload-results"><li v-for="(result,i) in uploadResults" :key="i"><strong>{{result.status}}</strong> — {{result.name}}<span v-if="result.error">: {{result.error}}</span></li></ul><div class="admin-photos"><div v-for="p in photos" :key="p.id"><img :src="p.thumbnail_url" :alt="p.original_filename"><small>{{p.original_filename}}</small><button @click="cover(p)">{{form.cover_photo_id===p.id?'✓ Cover':'Jadikan cover'}}</button><button @click="removePhoto(p)">Hapus foto</button></div></div></template></template><template v-else><form @submit.prevent="saveCategory" class="admin-form"><label>Nama kategori<input v-model="cat.name" @input="!cat.id && (cat.slug=slug(cat.name))" required></label><label>Slug<input v-model="cat.slug" required></label><label>Deskripsi<input v-model="cat.description"></label><label class="check"><input type="checkbox" v-model="cat.is_active"> Aktif</label><button class="button dark">Simpan kategori</button></form><div class="admin-table"><div v-for="c in categories" class="admin-row"><div><strong>{{c.name}}</strong><small>{{c.albums_count}} album</small></div><button @click="cat={...c}">Edit</button><button @click="deleteCategory(c)">Hapus</button></div></div></template></main></div></template>
+
+
+
+
+

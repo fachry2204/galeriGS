@@ -1,0 +1,27 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+
+# Dependencies and builds
+**/node_modules/
+**/vendor/
+**/dist/
+**/public/build/
+**/public/hot
+**/public/storage
+
+# Local databases and generated runtime files
+**/database/*.sqlite
+**/database/*.sqlite-*
+**/storage/app/public/*
+!**/storage/app/public/.gitignore
+**/storage/logs/*
+!**/storage/logs/.gitignore
+**/.phpunit.cache/
+**/.phpunit.result.cache
