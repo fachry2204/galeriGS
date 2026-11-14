@@ -38,3 +38,9 @@ Foto contoh bersumber dari Unsplash. Lambang DKI Jakarta pada header menggunakan
 ## Thumbnail foto
 
 Foto baru dibuatkan thumbnail JPEG maksimum 1200 piksel. Galeri dan popup menggunakan thumbnail, sedangkan unduhan menggunakan file asli. Untuk membuat thumbnail foto yang sudah ada, jalankan php artisan photos:generate-thumbnails dari direktori proyek, atau masukkan photos:generate-thumbnails di tab Artisan Plesk. Perintah aman diulang dan melewati thumbnail yang sudah ada. Jika ada foto gagal diproses, periksa pesan untuk ID foto, ketersediaan PHP GD dan memory_limit, lalu jalankan ulang. Sampai thumbnail tersedia, aplikasi tetap menampilkan file asli.
+
+## Subalbum
+
+Admin dapat membuat subalbum satu tingkat dengan memilih album induk pada formulir atau menekan Tambah subalbum. Foto diunggah ke album yang sedang dibuka dan thumbnail hasil unggah ditampilkan pada daftar hasil. Subalbum publik hanya terlihat jika album induk dan subalbum sama-sama dipublikasikan. Album induk yang masih memiliki subalbum tidak dapat dihapus. Setelah memperbarui aplikasi, jalankan migrasi database sebelum membuka halaman admin.
+
+Sampul album dapat dipilih saat membuat atau mengedit album. Sampul diperkecil dan disimpan terpisah dari foto album; foto album tetap dapat dipilih sebagai sampul melalui tombol Jadikan cover. Jika sampul tidak dipilih, kartu menggunakan foto pertama jika tersedia. Untuk pembaruan server, jalankan migrasi database sebelum memakai fitur ini.

@@ -13,9 +13,17 @@ class ThumbnailService
     {
         $disk = Storage::disk('public');
         if ($photo->thumbnail_path && $disk->exists($photo->thumbnail_path)) return $photo->thumbnail_path;
-        if (!extension_loaded('gd')) throw new RuntimeException('Ekstensi PHP GD tidak tersedia.');
         if (!$disk->exists($photo->filepath)) throw new RuntimeException('File asli tidak ditemukan.');
-        $sourcePath = $disk->path($photo->filepath);
+        $path = $this->createFromFile($disk->path($photo->filepath), 'thumbnails/'.$photo->album_id);
+        try { $photo->update(['thumbnail_path' => $path]); }
+        catch (Throwable $e) { $disk->delete($path); throw $e; }
+        return $path;
+    }
+
+    public function createFromFile(string $sourcePath, string $directory): string
+    {
+        $disk = Storage::disk('public');
+        if (!extension_loaded('gd')) throw new RuntimeException('Ekstensi PHP GD tidak tersedia.');
         $info = @getimagesize($sourcePath);
         if (!$info || empty($info[0]) || empty($info[1])) throw new RuntimeException('File gambar tidak valid.');
         [$width, $height] = $info;
@@ -60,9 +68,8 @@ class ThumbnailService
             try { $encoded = imagejpeg($thumb, null, 78); $bytes = ob_get_contents(); }
             finally { ob_end_clean(); }
             if (!$encoded || !$bytes) throw new RuntimeException('Gagal mengkodekan thumbnail.');
-            $path = 'thumbnails/'.$photo->album_id.'/'.Str::uuid().'.jpg';
+            $path = $directory.'/'.Str::uuid().'.jpg';
             if (!$disk->put($path, $bytes, 'public')) throw new RuntimeException('Gagal menyimpan thumbnail.');
-            $photo->update(['thumbnail_path' => $path]);
             return $path;
         } catch (Throwable $e) {
             if ($path) $disk->delete($path);

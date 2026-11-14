@@ -25,12 +25,32 @@ class GalleryTest extends TestCase {
   $this->assertDatabaseMissing('categories',['id'=>$category->id]); $this->assertDatabaseHas('albums',['id'=>$album->id,'category_id'=>$target->id]); $this->assertDatabaseHas('albums',['id'=>$archived->id,'category_id'=>$target->id]); $this->assertDatabaseHas('photos',['id'=>$photo->id]); Storage::disk('public')->assertExists('a.jpg');
  }
  public function test_unused_category_can_be_deleted(): void { Sanctum::actingAs($this->admin()); $c=Category::create(['name'=>'Kosong','slug'=>'kosong']); $this->deleteJson("/api/v1/admin/categories/{$c->id}")->assertNoContent(); $this->assertDatabaseMissing('categories',['id'=>$c->id]); }
- public function test_album_with_photos_cannot_be_deleted(): void {
+ public function test_deleting_album_removes_its_photos_and_thumbnails_but_preserves_other_albums(): void {
   Storage::fake('public'); Sanctum::actingAs($this->admin()); $album=$this->album();
-  $photo=$album->photos()->create(['filename'=>'a.jpg','original_filename'=>'a.jpg','filepath'=>'a.jpg','mime_type'=>'image/jpeg','file_size'=>3]); Storage::disk('public')->put('a.jpg','abc');
-  $this->deleteJson("/api/v1/admin/albums/{$album->id}")->assertStatus(409);
-  $this->assertDatabaseHas('albums',['id'=>$album->id,'deleted_at'=>null]); $this->assertDatabaseHas('photos',['id'=>$photo->id]); Storage::disk('public')->assertExists('a.jpg');
-  $this->deleteJson("/api/v1/admin/photos/{$photo->id}")->assertNoContent(); $this->deleteJson("/api/v1/admin/albums/{$album->id}")->assertNoContent(); $this->assertSoftDeleted('albums',['id'=>$album->id]);
+  $other=Album::create(['category_id'=>$album->category_id,'title'=>'Lain','slug'=>'lain','is_published'=>true]);
+  foreach (range(1,55) as $i) {
+   $path="photos/album/$i.jpg"; $thumb="thumbnails/album/$i.jpg";
+   $photo=$album->photos()->create(['filename'=>"$i.jpg",'original_filename'=>"$i.jpg",'filepath'=>$path,'thumbnail_path'=>$thumb,'mime_type'=>'image/jpeg','file_size'=>3]);
+   Storage::disk('public')->put($path,'abc'); Storage::disk('public')->put($thumb,'thumb');
+   if ($i===1) $album->update(['cover_photo_id'=>$photo->id]);
+  }
+  $otherPhoto=$other->photos()->create(['filename'=>'keep.jpg','original_filename'=>'keep.jpg','filepath'=>'photos/keep.jpg','thumbnail_path'=>'thumbnails/keep.jpg','mime_type'=>'image/jpeg','file_size'=>3]);
+  Storage::disk('public')->put('photos/keep.jpg','keep');Storage::disk('public')->put('thumbnails/keep.jpg','keep');
+  $this->deleteJson("/api/v1/admin/albums/{$album->id}")->assertNoContent();
+  $this->assertSoftDeleted('albums',['id'=>$album->id]);$this->assertDatabaseMissing('photos',['album_id'=>$album->id]);
+  Storage::disk('public')->assertMissing('photos/album/1.jpg');Storage::disk('public')->assertMissing('thumbnails/album/1.jpg');Storage::disk('public')->assertMissing('photos/album/55.jpg');Storage::disk('public')->assertMissing('thumbnails/album/55.jpg');
+  $this->assertDatabaseHas('photos',['id'=>$otherPhoto->id]);Storage::disk('public')->assertExists('photos/keep.jpg');Storage::disk('public')->assertExists('thumbnails/keep.jpg');
+ }
+ public function test_album_deletion_keeps_file_shared_with_another_album(): void {
+  Storage::fake('public');Sanctum::actingAs($this->admin());$album=$this->album();$other=Album::create(['category_id'=>$album->category_id,'title'=>'Lain','slug'=>'lain']);
+  $attrs=['filename'=>'same.jpg','original_filename'=>'same.jpg','filepath'=>'same.jpg','thumbnail_path'=>'shared-thumb.jpg','mime_type'=>'image/jpeg','file_size'=>3];
+  $album->photos()->create($attrs);$kept=$other->photos()->create($attrs);Storage::disk('public')->put('same.jpg','abc');Storage::disk('public')->put('shared-thumb.jpg','abc');
+  $this->deleteJson("/api/v1/admin/albums/{$album->id}")->assertNoContent();$this->assertDatabaseHas('photos',['id'=>$kept->id]);Storage::disk('public')->assertExists('same.jpg');Storage::disk('public')->assertExists('shared-thumb.jpg');
+ }
+ public function test_album_is_not_deleted_if_file_deletion_fails(): void {
+  Sanctum::actingAs($this->admin());$album=$this->album();$photo=$album->photos()->create(['filename'=>'a.jpg','original_filename'=>'a.jpg','filepath'=>'a.jpg','mime_type'=>'image/jpeg','file_size'=>3]);
+  $disk=\Mockery::mock(\Illuminate\Filesystem\FilesystemAdapter::class);$disk->shouldReceive('exists')->once()->with('a.jpg')->andReturn(true);$disk->shouldReceive('delete')->once()->with('a.jpg')->andReturn(false);Storage::shouldReceive('disk')->with('public')->andReturn($disk);
+  $this->deleteJson("/api/v1/admin/albums/{$album->id}")->assertStatus(500);$this->assertDatabaseHas('albums',['id'=>$album->id,'deleted_at'=>null]);$this->assertDatabaseHas('photos',['id'=>$photo->id]);
  }
  public function test_deleting_photo_keeps_shared_file_and_other_photos(): void {
   Storage::fake('public'); Sanctum::actingAs($this->admin()); $album=$this->album();

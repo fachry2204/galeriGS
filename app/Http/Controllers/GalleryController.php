@@ -10,30 +10,68 @@ class GalleryController extends Controller {
  public function me(Request $r) { return $r->user(); }
  public function logout(Request $r) { $r->user()->currentAccessToken()->delete(); return response()->noContent(); }
  public function password(Request $r) { $v=$r->validate(['current_password'=>'required|current_password','password'=>'required|string|min:12|confirmed']); $r->user()->update(['password'=>Hash::make($v['password']),'must_change_password'=>false]); $r->user()->tokens()->where('id','!=',$r->user()->currentAccessToken()->id)->delete(); return ['message'=>'Password diperbarui']; }
- public function albums(Request $r) { $q=Album::where('is_published',true)->with(['category','cover'])->withCount('photos'); if($r->filled('search')) $q->where('title','like','%'.$r->search.'%'); if($r->filled('category')) $q->whereHas('category',fn($q)=>$q->where('slug',$r->category)); if($r->filled('year')) $q->whereYear('event_date',$r->year); return $q->orderBy('event_date',$r->sort==='oldest'?'asc':'desc')->paginate(12); }
- public function photos(Request $r) { $q=Photo::whereHas('album', fn($q)=>$q->where('is_published',true))->with(['album.category']); if ($r->filled('category')) $q->whereHas('album.category', fn($q)=>$q->where('slug',$r->category)); if ($r->filled('search')) $q->where(fn($q)=>$q->where('original_filename','like','%'.$r->search.'%')->orWhereHas('album',fn($q)=>$q->where('title','like','%'.$r->search.'%'))); return $q->orderBy('original_filename')->orderBy('id')->paginate(24); }
- public function album(string $slug) { return Album::where('slug',$slug)->where('is_published',true)->with(['category','cover'])->withCount('photos')->firstOrFail(); }
- public function albumPhotos(string $slug) { $a=Album::where('slug',$slug)->where('is_published',true)->firstOrFail(); return $a->photos()->paginate(24); }
- public function categories() { return Category::where('is_active',true)->withCount(['albums'=>fn($q)=>$q->where('is_published',true)])->get(); }
+ public function albums(Request $r) { $q=Album::visible()->with(['category','cover','previewPhoto','parent:id,title,slug'])->withCount(['photos','children'=>fn($q)=>$q->visible()]); if($r->boolean('root_only')) $q->whereNull('parent_id'); if($r->filled('search')) $q->where('title','like','%'.$r->search.'%'); if($r->filled('category')) $q->whereHas('category',fn($q)=>$q->where('slug',$r->category)); if($r->filled('year')) $q->whereYear('event_date',$r->year); return $q->orderBy('event_date',$r->sort==='oldest'?'asc':'desc')->orderBy('id',$r->sort==='oldest'?'asc':'desc')->paginate(12); }
+ public function photos(Request $r) { $q=Photo::whereHas('album', fn($q)=>$q->visible())->with(['album.category']); if ($r->filled('category')) $q->whereHas('album.category', fn($q)=>$q->where('slug',$r->category)); if ($r->filled('search')) $q->where(fn($q)=>$q->where('original_filename','like','%'.$r->search.'%')->orWhereHas('album',fn($q)=>$q->where('title','like','%'.$r->search.'%'))); return $q->orderBy('original_filename')->orderBy('id')->paginate(24); }
+ public function album(string $slug) { return Album::where('slug',$slug)->visible()->with(['category','cover','parent:id,title,slug'])->withCount('photos')->firstOrFail(); }
+ public function albumPhotos(string $slug) { $a=Album::where('slug',$slug)->visible()->firstOrFail(); return $a->photos()->paginate(24); }
+ public function albumChildren(string $slug) { $a=Album::where('slug',$slug)->visible()->firstOrFail(); return $a->children()->visible()->with(['category','cover','previewPhoto'])->withCount('photos')->orderByDesc('event_date')->orderBy('id')->paginate(12); }
+ public function categories() { return Category::where('is_active',true)->withCount(['albums'=>fn($q)=>$q->visible()])->get(); }
  public function settings() { return Setting::pluck('value','key'); }
- public function download(Photo $photo) { abort_unless($photo->album && $photo->album->is_published,404); abort_unless(Storage::disk('public')->exists($photo->filepath),404); return Storage::disk('public')->download($photo->filepath,basename($photo->original_filename)); }
- public function adminAlbums() { return Album::with(['category','cover'])->withCount('photos')->latest()->paginate(20); }
- public function saveAlbum(Request $r, ?Album $album=null) { $album ??= new Album; $v=$r->validate(['category_id'=>'required|exists:categories,id','title'=>'required|string|max:255','slug'=>['required','alpha_dash','max:255',Rule::unique('albums')->ignore($album->id)],'description'=>'nullable|string','event_date'=>'nullable|date','location'=>'nullable|string|max:255','is_featured'=>'boolean','is_published'=>'boolean','cover_photo_id'=>['nullable',Rule::exists('photos','id')->where('album_id',$album->id)]]); if(($v['is_published']??false) && !$album->published_at) $v['published_at']=now(); $album->fill($v)->save(); return response()->json($album->load(['category','cover']),$album->wasRecentlyCreated?201:200); }
- public function adminAlbum(Album $album) { return $album->load(['category','cover','photos']); }
+ public function download(Photo $photo) { abort_unless(Album::visible()->whereKey($photo->album_id)->exists(),404); abort_unless(Storage::disk('public')->exists($photo->filepath),404); return Storage::disk('public')->download($photo->filepath,basename($photo->original_filename)); }
+ public function adminAlbums() { return Album::with(['category','cover','parent:id,title'])->withCount(['photos','children'])->latest()->paginate(20); }
+ public function albumParents(){ return Album::whereNull('parent_id')->orderBy('title')->get(['id','title','category_id']); }
+ public function saveAlbum(Request $r, ?Album $album=null) { $album ??= new Album; $v=$r->validate(['parent_id'=>['nullable','integer',Rule::exists('albums','id')->whereNull('parent_id')->whereNull('deleted_at'),Rule::notIn([$album->id])],'category_id'=>'required|exists:categories,id','title'=>'required|string|max:255','slug'=>['required','alpha_dash','max:255',Rule::unique('albums')->ignore($album->id)],'description'=>'nullable|string','event_date'=>'nullable|date','location'=>'nullable|string|max:255','is_featured'=>'boolean','is_published'=>'boolean','cover_photo_id'=>['nullable',Rule::exists('photos','id')->where('album_id',$album->id)]]); if (!empty($v['parent_id']) && $album->exists && $album->children()->exists()) return response()->json(['message'=>'Album yang memiliki subalbum tidak dapat dijadikan subalbum.'],422); if(($v['is_published']??false) && !$album->published_at) $v['published_at']=now(); $album->fill($v)->save(); return response()->json($album->load(['category','cover']),$album->wasRecentlyCreated?201:200); }
+ public function uploadAlbumCover(Request $r, Album $album, ThumbnailService $thumbnails) {
+  $v=$r->validate(['cover'=>'required|image|mimes:jpeg,jpg,png,webp|max:20480']);
+  try { $path=$thumbnails->createFromFile($v['cover']->getRealPath(),'album-covers/'.$album->id); }
+  catch (\Throwable $e) { report($e); return response()->json(['message'=>'Gambar sampul tidak dapat diproses. Periksa format file dan konfigurasi PHP GD.'],422); }
+  $old=$album->cover_path;
+  try { $album->update(['cover_path'=>$path,'cover_photo_id'=>null]); }
+  catch (\Throwable $e) { Storage::disk('public')->delete($path); throw $e; }
+  if ($old && $old!==$path) { try { $this->removeAlbumCoverFile($old,$album->id); } catch (\Throwable $e) { report($e); } }
+  return $album->fresh()->load(['category','cover','parent']);
+ }
+ public function selectAlbumCover(Request $r, Album $album) {
+  $v=$r->validate(['photo_id'=>['required','integer',Rule::exists('photos','id')->where('album_id',$album->id)]]);
+  $old=$album->cover_path;
+  $album->update(['cover_path'=>null,'cover_photo_id'=>$v['photo_id']]);
+  if ($old) { try { $this->removeAlbumCoverFile($old,$album->id); } catch (\Throwable $e) { report($e); } }
+  return $album->fresh()->load(['category','cover','parent']);
+ }
+ private function removeAlbumCoverFile(?string $path, int $albumId): void {
+  if (!$path) return;
+  $shared=Album::withTrashed()->whereKeyNot($albumId)->where('cover_path',$path)->exists() || Photo::where(fn($q)=>$q->where('filepath',$path)->orWhere('thumbnail_path',$path))->exists();
+  $disk=Storage::disk('public');
+  if (!$shared && $disk->exists($path) && !$disk->delete($path)) throw new \RuntimeException('Gagal menghapus sampul album.');
+ }
+ public function adminAlbum(Album $album) { return $album->load(['category','cover','photos','parent'])->loadCount('children'); }
  public function deleteAlbum(Album $album) {
-  if ($album->photos()->exists()) return response()->json(['message'=>'Album masih berisi foto. Hapus foto yang dipilih melalui halaman edit; album hanya dapat dihapus setelah kosong.'],409);
-  $album->delete(); return response()->noContent();
+  if ($album->children()->exists()) return response()->json(['message'=>'Album masih memiliki subalbum. Pindahkan atau hapus subalbum terlebih dahulu.'],409);
+  try {
+   $album->photos()->reorder()->chunkById(50, function ($photos) {
+    foreach ($photos as $photo) $this->removePhoto($photo);
+   });
+   if ($album->photos()->exists()) return response()->json(['message'=>'Masih ada foto di album. Coba hapus kembali.'],409);
+   $this->removeAlbumCoverFile($album->cover_path,$album->id);
+   $album->delete();
+   return response()->noContent();
+  } catch (\Throwable $e) {
+   report($e);
+   return response()->json(['message'=>'Penghapusan tidak selesai. Sebagian foto mungkin sudah terhapus; periksa album dan izin penyimpanan sebelum mencoba kembali.'],500);
+  }
  }
  private function removePhoto(Photo $photo) {
-  $paths=DB::transaction(function() use ($photo) {
-   Album::withTrashed()->where('cover_photo_id',$photo->id)->update(['cover_photo_id'=>null]);
-   $paths=array_unique(array_filter([$photo->filepath,$photo->thumbnail_path]));
-   $photo->delete();
-   return $paths;
+  DB::transaction(function() use ($photo) {
+   $locked=Photo::whereKey($photo->id)->lockForUpdate()->firstOrFail();
+   $paths=array_unique(array_filter([$locked->thumbnail_path,$locked->filepath]));
+   $disk=Storage::disk('public');
+   foreach ($paths as $path) {
+    $shared=Photo::whereKeyNot($locked->id)->where(fn($q)=>$q->where('filepath',$path)->orWhere('thumbnail_path',$path))->exists();
+    if (!$shared && $disk->exists($path) && !$disk->delete($path)) throw new \RuntimeException('Gagal menghapus file foto dari penyimpanan.');
+   }
+   Album::withTrashed()->where('cover_photo_id',$locked->id)->update(['cover_photo_id'=>null]);
+   $locked->delete();
   });
-  foreach ($paths as $path) {
-   if (!Photo::where('filepath',$path)->orWhere('thumbnail_path',$path)->exists()) Storage::disk('public')->delete($path);
-  }
  }
  public function deletePhoto(Photo $photo) { $this->removePhoto($photo); return response()->noContent(); }
  public function bulkDelete(Request $r) { $v=$r->validate(['ids'=>'required|array|max:100','ids.*'=>'required|integer|exists:photos,id']); foreach(Photo::whereIn('id',$v['ids'])->get() as $photo) $this->removePhoto($photo); return response()->noContent(); }
