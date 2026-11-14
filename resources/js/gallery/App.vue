@@ -27,13 +27,13 @@ onMounted(async () => {
     </div>
   </header>
   <router-view />
-  <footer id="tentang">
-    <div><div class="brand footer-brand"><img class="dki-logo" :src="logoDki" alt="Lambang DKI Jakarta"><span class="brand-name"><small>KELURAHAN</small><br>GROGOL SELATAN</span></div><p>{{ settings.description || 'Arsip foto kegiatan, tempat, dan kehidupan di Jakarta.' }}</p></div>
-    <div><strong>Jelajahi</strong><p><router-link to="/">Galeri foto</router-link></p><p><router-link to="/albums">Album</router-link></p></div>
-    <div><strong>Kontak</strong><p v-if="settings.email"><a :href="'mailto:' + settings.email">{{ settings.email }}</a></p><p v-else>Jakarta, Indonesia</p></div>
-    <div class="copyright">{{ settings.copyright || `© ${new Date().getFullYear()} Jakarta Photo Gallery` }}</div>
+  <footer id="tentang" class="site-footer">
+    <div class="brand footer-brand"><img class="dki-logo" :src="logoDki" alt="Lambang DKI Jakarta"><span class="brand-name"><small>KELURAHAN</small><br>GROGOL SELATAN</span></div>
+    <nav class="footer-links" aria-label="Navigasi footer"><router-link to="/">Galeri Foto</router-link><router-link to="/albums">Album</router-link><a v-if="settings.email" :href="'mailto:' + settings.email">Kontak</a></nav>
+    <div class="copyright">{{ settings.copyright || `© ${new Date().getFullYear()} Kelurahan Grogol Selatan` }}</div>
   </footer>
 </template>
+
 
 
 
