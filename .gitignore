@@ -25,3 +25,16 @@
 !**/storage/logs/.gitignore
 **/.phpunit.cache/
 **/.phpunit.result.cache
+# Laravel and editor local files
+/auth.json
+/.phpactor.json
+/.phpunit.result.cache
+/Homestead.json
+/Homestead.yaml
+/.fleet
+/.idea
+/.nova
+/.zed
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
