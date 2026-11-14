@@ -10,6 +10,11 @@ class SubalbumTest extends TestCase {
  use RefreshDatabase;
  private function admin(): void { Sanctum::actingAs(User::create(['name'=>'Admin','username'=>'admin','email'=>'admin@example.test','password'=>'password-123','role'=>'admin','must_change_password'=>false])); }
  private function album(Category $category,string $slug,bool $published=true,?int $parent=null): Album { return Album::create(['category_id'=>$category->id,'title'=>$slug,'slug'=>$slug,'is_published'=>$published,'parent_id'=>$parent]); }
+ public function test_admin_listing_groups_subalbums_with_their_parents(): void {
+  $this->admin();$category=Category::create(['name'=>'Test','slug'=>'test']);$root=$this->album($category,'utama');$child=$this->album($category,'anak',false,$root->id);
+  $response=$this->getJson('/api/v1/admin/albums')->assertOk()->assertJsonCount(1,'data')->assertJsonPath('data.0.id',$root->id)->assertJsonPath('data.0.children.0.id',$child->id)->assertJsonPath('data.0.children.0.is_published',false)->assertJsonPath('data.0.children_count',1);
+  $this->assertSame(1,$response->json('total'));
+ }
  public function test_admin_can_create_subalbum_but_not_nested_or_cyclic(): void {
   $this->admin();$category=Category::create(['name'=>'Test','slug'=>'test']);$root=$this->album($category,'utama');
   $response=$this->postJson('/api/v1/admin/albums',['title'=>'Anak','slug'=>'anak','category_id'=>$category->id,'parent_id'=>$root->id,'is_published'=>true])->assertCreated();$child=Album::findOrFail($response->json('id'));$this->assertSame($root->id,$child->parent_id);
