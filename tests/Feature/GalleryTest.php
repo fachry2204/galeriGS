@@ -39,9 +39,11 @@ class GalleryTest extends TestCase {
   $this->deleteJson("/api/v1/admin/photos/{$one->id}")->assertNoContent(); $this->assertDatabaseHas('photos',['id'=>$two->id]); Storage::disk('public')->assertExists('shared.jpg');
   $this->deleteJson("/api/v1/admin/photos/{$two->id}")->assertNoContent(); Storage::disk('public')->assertMissing('shared.jpg');
  }
+ public function test_gallery_orders_filenames_before_paginating(): void {
+  $album=$this->album();
+  foreach (range(25,1) as $number) { $name=sprintf('DSC%05d.jpg',$number); $album->photos()->create(['filename'=>$name,'original_filename'=>$name,'filepath'=>'photos/'.$name,'mime_type'=>'image/jpeg','file_size'=>1]); }
+  $this->getJson('/api/v1/photos?page=1')->assertOk()->assertJsonCount(24,'data')->assertJsonPath('data.0.original_filename','DSC00001.jpg')->assertJsonPath('data.23.original_filename','DSC00024.jpg');
+  $this->getJson('/api/v1/photos?page=2')->assertOk()->assertJsonCount(1,'data')->assertJsonPath('data.0.original_filename','DSC00025.jpg');
+ }
  public function test_private_photos_cannot_be_downloaded(): void { Storage::fake('public'); $a=$this->album(); $a->update(['is_published'=>false]); $p=$a->photos()->create(['filename'=>'a.jpg','original_filename'=>'a.jpg','filepath'=>'a.jpg','mime_type'=>'image/jpeg','file_size'=>3]); Storage::disk('public')->put('a.jpg','abc'); $this->get("/api/v1/photos/{$p->id}/download")->assertNotFound(); }
 }
-
-
-
-
