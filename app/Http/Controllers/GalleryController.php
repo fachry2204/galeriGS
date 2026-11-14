@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 use App\Models\{User,Album,Photo,Category,Setting,ActivityLog};
+use App\Services\ThumbnailService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{Hash,Storage,DB};
 use Illuminate\Validation\Rule;
@@ -37,7 +38,7 @@ class GalleryController extends Controller {
  public function deletePhoto(Photo $photo) { $this->removePhoto($photo); return response()->noContent(); }
  public function bulkDelete(Request $r) { $v=$r->validate(['ids'=>'required|array|max:100','ids.*'=>'required|integer|exists:photos,id']); foreach(Photo::whereIn('id',$v['ids'])->get() as $photo) $this->removePhoto($photo); return response()->noContent(); }
  public function reorder(Request $r) { $v=$r->validate(['album_id'=>'required|exists:albums,id','ids'=>'required|array|max:1000','ids.*'=>'integer|distinct']); $photos=Photo::where('album_id',$v['album_id'])->whereIn('id',$v['ids'])->count(); abort_unless($photos===count($v['ids']),422); foreach($v['ids'] as $i=>$id) Photo::where('id',$id)->update(['sort_order'=>$i]); return response()->noContent(); }
- public function upload(Request $r, Album $album) { $v=$r->validate(['photos'=>'required|array|max:10','photos.*'=>'required|image|mimes:jpeg,jpg,png,webp|max:20480']); $out=[]; foreach($v['photos'] as $file) { $path=$file->store('photos/'.$album->id,'public'); [$w,$h]=getimagesize($file->getRealPath()); $out[]=$album->photos()->create(['filename'=>basename($path),'original_filename'=>$file->getClientOriginalName(),'filepath'=>$path,'mime_type'=>$file->getMimeType(),'file_size'=>$file->getSize(),'width'=>$w,'height'=>$h,'sort_order'=>($album->photos()->max('sort_order')??-1)+1]); } return response()->json($out,201); }
+ public function upload(Request $r, Album $album) { $v=$r->validate(['photos'=>'required|array|max:10','photos.*'=>'required|image|mimes:jpeg,jpg,png,webp|max:20480']); $out=[]; foreach($v['photos'] as $file) { $path=$file->store('photos/'.$album->id,'public'); [$w,$h]=getimagesize($file->getRealPath()); $photo=$album->photos()->create(['filename'=>basename($path),'original_filename'=>$file->getClientOriginalName(),'filepath'=>$path,'mime_type'=>$file->getMimeType(),'file_size'=>$file->getSize(),'width'=>$w,'height'=>$h,'sort_order'=>($album->photos()->max('sort_order')??-1)+1]); try { app(ThumbnailService::class)->generate($photo); } catch (\Throwable $e) { report($e); } $out[]=$photo; } return response()->json($out,201); }
  public function adminCategories(){return Category::withCount(['albums', 'albums as albums_total_count'=>fn($q)=>$q->withTrashed()])->get();}
  public function saveCategory(Request $r, ?Category $category=null){$category ??= new Category; $v=$r->validate(['name'=>'required|string|max:255','slug'=>['required','alpha_dash',Rule::unique('categories')->ignore($category->id)],'description'=>'nullable|string','is_active'=>'boolean']); $category->fill($v)->save(); return $category;}
  public function deleteCategory(Request $r, Category $category) {
@@ -59,7 +60,3 @@ class GalleryController extends Controller {
  public function statistics(){return ['albums'=>Album::count(),'photos'=>Photo::count(),'categories'=>Category::count(),'recent'=>Album::with('category')->latest()->take(5)->get()];}
  public function activities(){return ActivityLog::with('user:id,name')->latest()->paginate(20);}
 }
-
-
-
-

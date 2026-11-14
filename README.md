@@ -4,7 +4,7 @@ Aplikasi Laravel 11 dan Vue 3 dalam satu proyek. Laravel melayani halaman dan AP
 
 ## Persyaratan
 
-PHP 8.2 dengan PDO MySQL, GD, dan Fileinfo; Composer 2; Node.js 20.19 atau lebih baru; MySQL 8. Pengembangan lokal diuji dengan MariaDB 10.4. Direktori storage dan bootstrap/cache harus dapat ditulis.
+PHP 8.2 dengan PDO MySQL, GD (JPEG, PNG, dan WebP), dan Fileinfo; Composer 2; Node.js 20.19 atau lebih baru; MySQL 8. Pengembangan lokal diuji dengan MariaDB 10.4. Direktori storage dan bootstrap/cache harus dapat ditulis.
 
 ## Instalasi
 
@@ -29,8 +29,12 @@ Atur document root web server ke public, dengan fallback request ke public/index
 
 ## Batasan
 
-Proyek masih dalam pengembangan. Thumbnail, antrean, pengaturan melalui UI, pengurutan dan hapus massal foto di UI, zoom/swipe, serta pengujian menyeluruh belum selesai. File pada storage/app/public dapat diakses siapa pun yang mengetahui URL, termasuk foto album draft. Gunakan penyimpanan privat dengan otorisasi sebelum menyimpan foto nonpublik.
+Proyek masih dalam pengembangan. Pemrosesan thumbnail melalui antrean, pengaturan melalui UI, pengurutan dan hapus massal foto di UI, zoom/swipe, serta pengujian menyeluruh belum selesai. File pada storage/app/public dapat diakses siapa pun yang mengetahui URL, termasuk foto album draft. Gunakan penyimpanan privat dengan otorisasi sebelum menyimpan foto nonpublik.
 
 Laravel 11 yang disyaratkan memiliki advisory keamanan. Lockfile dibuat dengan pengecualian pemeriksaan Composer; ini tidak memperbaiki advisory. Tinjau composer audit dan rencanakan upgrade ke versi yang didukung sebelum produksi.
 
 Foto contoh bersumber dari Unsplash. Lambang DKI Jakarta pada header menggunakan gambar ulang berdasarkan lambang resmi dari Wikimedia Commons: https://commons.wikimedia.org/wiki/File:Coat_of_arms_of_Jakarta.svg
+
+## Thumbnail foto
+
+Foto baru dibuatkan thumbnail JPEG maksimum 1200 piksel. Galeri dan popup menggunakan thumbnail, sedangkan unduhan menggunakan file asli. Untuk membuat thumbnail foto yang sudah ada, jalankan php artisan photos:generate-thumbnails dari direktori proyek, atau masukkan photos:generate-thumbnails di tab Artisan Plesk. Perintah aman diulang dan melewati thumbnail yang sudah ada. Jika ada foto gagal diproses, periksa pesan untuk ID foto, ketersediaan PHP GD dan memory_limit, lalu jalankan ulang. Sampai thumbnail tersedia, aplikasi tetap menampilkan file asli.
